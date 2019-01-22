@@ -3,8 +3,10 @@ cmake_minimum_required(VERSION 2.8)
  
 PROJECT(VTKSuperpixels)
  
+set(CMAKE_CXX_FLAGS "-fpermissive")
+
 find_package(VTK REQUIRED)
-include(${VTK_USE_FILE})
+# include(${VTK_USE_FILE})
 
 file(GLOB HEADER_FILES *.h *.hxx)
 file(GLOB MXHEADER_FILES Mx/*.h Mx/*hxx)

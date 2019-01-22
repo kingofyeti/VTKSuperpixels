@@ -4,6 +4,8 @@
 #  pragma once
 #endif
 
+#include <cstdlib>
+
 /************************************************************************
 
   MxBlock provides typed access a contiguous block of elements.
