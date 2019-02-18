@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <iostream>
 #include <vtkImageAlgorithm.h>
 #include <vtkImageData.h>
 
@@ -29,7 +30,7 @@ public:
 	static vtkSuperpixelFilter* New();
 	vtkTypeMacro(vtkSuperpixelFilter, vtkImageAlgorithm);
 
-	vtkSuperpixelFilter() { }
+	vtkSuperpixelFilter();
 	~vtkSuperpixelFilter();
 
 	void SetOutputType(OutputType outputType) { vtkSuperpixelFilter::outputType = outputType; this->Modified(); }
@@ -56,6 +57,8 @@ private:
 	void initClusters(vtkImageData* input);
 	MxHeap* createHeap(vtkImageData* input);
 	void removeEdges(MxHeap* minHeap, ClusterPair* pair);
+
+	void calcHeap(vtkImageData* input);
 
 	void calcColorLabels(vtkImageData* output);
 	void calcRandRgb(vtkImageData* output);

@@ -23,7 +23,7 @@ VTK_MODULE_INIT(vtkRenderingOpenGL2)
 #include <iostream>
 #include <string>
 
-void test3DImage(std::string infile_path, std::string outfile_path, unsigned int num_superpixel = 50);
+void test3DImage(std::string infile_path, unsigned int num_superpixel = 50);
 void test2DImage();
 
 // Callback for slider, for 3d image tests
@@ -52,13 +52,11 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 	std::string infile_path = argv[1];
-	std::string outfile_path = argv[2];
 	unsigned int num_superpixel = 50;
-	if (argc == 4)
-		num_superpixel = strtol(argv[3], NULL, 10);;
-
-	test3DImage(infile_path, outfile_path, num_superpixel);
-	std::cout << float(clock() - begin_time) / CLOCKS_PER_SEC << std::endl;
+	if (argc >= 3)
+		num_superpixel = strtol(argv[2], NULL, 10);
+	test3DImage(infile_path, num_superpixel);
+	std::cout << "Time: " << float(clock() - begin_time) / CLOCKS_PER_SEC << std::endl;
 
 	return EXIT_SUCCESS;
 }
@@ -122,7 +120,7 @@ void test2DImage()
 	writer->Write();
 }
 
-void test3DImage(std::string infile_path, std::string outfile_path, unsigned int num_superpixel)
+void test3DImage(std::string infile_path, unsigned int num_superpixel)
 {
 	// Read 2d or 3d meta image (mhd)
 	vtkSmartPointer<vtkNIFTIImageReader> reader = vtkSmartPointer<vtkNIFTIImageReader>::New();
@@ -134,7 +132,23 @@ void test3DImage(std::string infile_path, std::string outfile_path, unsigned int
 	superpixelFilter->SetInputData(reader->GetOutput());
 	superpixelFilter->SetNumberOfSuperpixels(num_superpixel);
 	superpixelFilter->SetSwapIterations(0);
-	superpixelFilter->SetOutputType(vtkSuperpixelFilter::AVGCOLOR);
+	// vtkSuperpixelFilter::OutputType outtype = vtkSuperpixelFilter::AVGCOLOR;
+	// if (output_type == "LABEL"){
+	// 	outtype = vtkSuperpixelFilter::LABEL;
+	// }
+	// if (output_type == "RANDRGB"){
+	// 	outtype = vtkSuperpixelFilter::RANDRGB;
+	// }
+	// if (output_type == "AVGCOLOR"){
+	// 	outtype = vtkSuperpixelFilter::AVGCOLOR;
+	// }
+	// if (output_type == "MAXCOLOR"){
+	// 	outtype = vtkSuperpixelFilter::MAXCOLOR;
+	// }
+	// if (output_type == "MINCOLOR"){
+	// 	outtype = vtkSuperpixelFilter::MINCOLOR;
+	// }
+	// superpixelFilter->SetOutputType(outtype);
 	superpixelFilter->Update();
 
 	// vtkSmartPointer<vtkImageShiftScale> imageCast = vtkSmartPointer<vtkImageShiftScale>::New();
@@ -182,9 +196,35 @@ void test3DImage(std::string infile_path, std::string outfile_path, unsigned int
 // 	/*imageViewer->GetRenderer()->ResetCamera();
 // 	imageViewer->Render();*/
 // 	renderWindowInteractor->Start();
+	
+	// Get 3 Output image
+	// 0: Label, 1: RandomRGB, 2:AVGColor
 
-	vtkSmartPointer<vtkNIFTIImageWriter> writer = vtkSmartPointer<vtkNIFTIImageWriter>::New();
-	writer->SetInputData(superpixelFilter->GetOutput());
-	writer->SetFileName(outfile_path.c_str());
-	writer->Write();
+	std::string file_prefix;
+
+	if (infile_path.substr(infile_path.length() - 7) == ".nii.gz")
+	{
+		file_prefix = infile_path.substr(0, infile_path.length() - 7);
+	}else if (infile_path.substr(infile_path.length() - 4) == ".nii")
+	{
+		file_prefix = infile_path.substr(0, infile_path.length() - 4);
+	}else{
+		std::cout << "Incorrect input file type\n";
+		return;
+	}
+
+	std::vector<vtkImageData*> outputData(3);
+	for (int i =0;i<3;i++){
+		vtkSmartPointer<vtkNIFTIImageWriter> writer = vtkSmartPointer<vtkNIFTIImageWriter>::New();
+		outputData[i] = superpixelFilter->GetOutput(i);
+		writer->SetInputData(outputData[i]);
+
+		std::string outfile_path;
+		if (i == 0) outfile_path = file_prefix + "_label.nii.gz";
+		if (i == 1) outfile_path = file_prefix + "_randrgb.nii.gz";
+		if (i == 2) outfile_path = file_prefix +  "_avgcolor.nii.gz";
+
+		writer->SetFileName(outfile_path.c_str());
+		writer->Write();
+	}
 }

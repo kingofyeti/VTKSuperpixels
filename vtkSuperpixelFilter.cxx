@@ -12,6 +12,11 @@
 
 vtkStandardNewMacro(vtkSuperpixelFilter);
 
+vtkSuperpixelFilter::vtkSuperpixelFilter()
+{
+  this->SetNumberOfOutputPorts(3);
+}
+
 vtkSuperpixelFilter::~vtkSuperpixelFilter()
 {
 	if (clusters != nullptr)
@@ -28,54 +33,108 @@ vtkSuperpixelFilter::~vtkSuperpixelFilter()
 
 int vtkSuperpixelFilter::RequestInformation(vtkInformation* vtkNotUsed(request), vtkInformationVector** vtkNotUsed(inputVec), vtkInformationVector* outputVec)
 {
+	// Number of output: 3: Label, RandomRGB and Average color
+	outputVec->SetNumberOfInformationObjects(3);
+	
 	// get the info objects
-	vtkInformation* outInfo = outputVec->GetInformationObject(0);
-	if (outputType == AVGCOLOR || outputType == LABEL || outputType == MAXCOLOR || outputType == MINCOLOR)
-		vtkDataObject::SetPointDataActiveScalarInfo(outInfo, VTK_FLOAT, 1);
-	else if (outputType == RANDRGB)
-		vtkDataObject::SetPointDataActiveScalarInfo(outInfo, VTK_UNSIGNED_CHAR, 3);
+	for (int i =0;i<3;i++){
+		vtkInformation* outInfo = outputVec->GetInformationObject(i);
+		// 0: Label, 1: RandomRGB, 2:AVGColor
+		if (i == 0)
+		{
+			vtkDataObject::SetPointDataActiveScalarInfo(outInfo, VTK_FLOAT, 1);
+		}
+		if (i == 1)
+		{
+			vtkDataObject::SetPointDataActiveScalarInfo(outInfo, VTK_UNSIGNED_CHAR, 3);
+		}
+		if (i == 2){
+			vtkDataObject::SetPointDataActiveScalarInfo(outInfo, VTK_FLOAT, 1);
+		}
+	}
 	return 1;
 }
 
 int vtkSuperpixelFilter::RequestData(vtkInformation* vtkNotUsed(request), vtkInformationVector** inputVec, vtkInformationVector* outputVec)
 {
+	outputVec->SetNumberOfInformationObjects(3);
+
 	// Get input image
 	vtkInformation* inInfo = inputVec[0]->GetInformationObject(0);
 	vtkImageData* input = vtkImageData::SafeDownCast(inInfo->Get(vtkDataObject::DATA_OBJECT()));
 
-	// Get output
-	vtkInformation* outInfo = outputVec->GetInformationObject(0);
-	vtkImageData* output = vtkImageData::SafeDownCast(outInfo->Get(vtkDataObject::DATA_OBJECT()));
+	calcHeap(input);
+	
+	// Calculate Label, RandomRGB and AVGColor
+	for (int i = 0;i < 3;i++){
+		vtkInformation* outInfo = outputVec->GetInformationObject(i);
+		vtkImageData* output = vtkImageData::SafeDownCast(outInfo->Get(vtkDataObject::DATA_OBJECT()));
+		// Set the information
+		output->SetExtent(input->GetExtent());
+		output->SetOrigin(input->GetOrigin());
+		output->SetSpacing(input->GetSpacing());
+		// 0: Label, 1: RandomRGB, 2:AVGColor
+		if (i == 0){
+			output->SetNumberOfScalarComponents(1, outInfo);
+			output->SetScalarType(VTK_FLOAT, outInfo);
+			output->AllocateScalars(outInfo);
+			calcColorLabels(output);
+		}
+		if (i == 1){
+			output->SetNumberOfScalarComponents(3, outInfo);
+			output->SetScalarType(VTK_UNSIGNED_CHAR, outInfo);
+			output->AllocateScalars(outInfo);
+			calcRandRgb(output);
+		}
+		if (i == 2){
+			output->SetNumberOfScalarComponents(1, outInfo);
+			output->SetScalarType(VTK_FLOAT, outInfo);
+			output->AllocateScalars(outInfo);
+			calcAvgColors(output);
+		}
+	}
+	/*auto end = std::chrono::steady_clock::now();
+	printf("Time: %f\n", std::chrono::duration<double, std::milli>(end - start).count() / 1000.0);*/
+
+	// print centroid labels
+	for (int i =0;i< outputClusters.size();i++)
+	{
+		Cluster* cluster = outputClusters[i];
+		float centroid[3] = {0,0,0};
+		for (int j=0;j<cluster->pixels.size();j++)
+		{
+			centroid[0] += cluster->pixels[j]->x;
+			centroid[1] += cluster->pixels[j]->y ;
+			centroid[2] += cluster->pixels[j]->z ;
+		}
+		centroid[0] /= cluster->pixels.size();
+		centroid[1] /= cluster->pixels.size();
+		centroid[2] /= cluster->pixels.size();
+		std::cout << centroid[0] << " "<< centroid[1] << " "<< centroid[2] << std::endl;
+	}
+	return 1;
+}
+
+void vtkSuperpixelFilter::calcHeap(vtkImageData* input)
+{
 	int* dim = input->GetDimensions();
 	int numDim = input->GetDataDimension();
 	if (numDim != 2 && numDim != 3)
 	{
 		vtkWarningMacro(<< "Only 2/3d images supported.");
-		return 1;
+		return;
 	}
 	if (input->GetNumberOfScalarComponents() > 1)
 	{
 		vtkWarningMacro(<< "Only grayscale images supported.");
-		return 1;
+		return;
 	}
 	unsigned int numPx = dim[0] * dim[1] * dim[2];
 	if (NumberOfSuperpixels >= numPx || NumberOfSuperpixels <= 0)
 	{
 		vtkWarningMacro(<< "Invalid number of superpixles.");
-		return 1;
+		return;
 	}
-	// Set the information
-	output->SetExtent(input->GetExtent());
-	output->SetOrigin(input->GetOrigin());
-	output->SetSpacing(input->GetSpacing());
-	output->SetNumberOfScalarComponents(1, outInfo);
-	output->SetScalarType(VTK_FLOAT, outInfo);
-	if (outputType == RANDRGB)
-	{
-		output->SetNumberOfScalarComponents(3, outInfo);
-		output->SetScalarType(VTK_UNSIGNED_CHAR, outInfo);
-	}
-	output->AllocateScalars(outInfo);
 
 	// Clean the minheap if it's already been created
 	if (minHeap != nullptr)
@@ -166,23 +225,6 @@ int vtkSuperpixelFilter::RequestData(vtkInformation* vtkNotUsed(request), vtkInf
 	{
 		computeSwap(dim[0], dim[1], dim[2]);
 	}
-	
-	// User can specify different output options
-	if (outputType == LABEL)
-		calcColorLabels(output);
-	else if (outputType == RANDRGB)
-		calcRandRgb(output);
-	else if (outputType == AVGCOLOR)
-		calcAvgColors(output);
-	else if (outputType == MAXCOLOR)
-		calcMaxColors(output);
-	else if (outputType == MINCOLOR)
-		calcMinColors(output);
-
-	/*auto end = std::chrono::steady_clock::now();
-	printf("Time: %f\n", std::chrono::duration<double, std::milli>(end - start).count() / 1000.0);*/
-
-	return 1;
 }
 
 void vtkSuperpixelFilter::removeEdges(MxHeap* minHeap, ClusterPair* pair)
@@ -300,7 +342,6 @@ void vtkSuperpixelFilter::computeSwap(int width, int height, int depth)
 		swaps[i].swap();
 	}
 }
-
 
 void vtkSuperpixelFilter::calcColorLabels(vtkImageData* output)
 {
